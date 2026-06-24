@@ -77,15 +77,17 @@ def fetch_sheet_cached(sdr: str, sheet_id: str, sheet_name: str) -> tuple[pd.Dat
 def _fetch_sheet_raw(sheet_id: str, sheet_name: str) -> tuple[pd.DataFrame | None, str | None]:
     """
     Busca os dados de uma planilha do Google Sheets sem cache.
-    Tenta até 3 vezes com intervalo crescente antes de desistir.
-    Usa headers de navegador para evitar bloqueios do Google.
+    Tenta 3 URLs diferentes para o mesmo arquivo (gviz e export),
+    pois servidores externos às vezes bloqueiam uma das rotas.
     """
     import time
+    import urllib.parse
 
-    url = (
-        f"https://docs.google.com/spreadsheets/d/{sheet_id}"
-        f"/gviz/tq?tqx=out:csv&sheet={sheet_name}"
-    )
+    sheet_enc = urllib.parse.quote(sheet_name)
+    urls = [
+        f"https://docs.google.com/spreadsheets/d/{sheet_id}/gviz/tq?tqx=out:csv&sheet={sheet_enc}",
+        f"https://docs.google.com/spreadsheets/d/{sheet_id}/export?format=csv&sheet={sheet_enc}",
+    ]
     headers = {
         "User-Agent": (
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
@@ -95,7 +97,9 @@ def _fetch_sheet_raw(sheet_id: str, sheet_name: str) -> tuple[pd.DataFrame | Non
     }
 
     ultimo_erro = ""
-    for tentativa in range(3):
+    for tentativa, url in enumerate(urls * 2):  # tenta cada URL, até 2 rodadas
+        if tentativa >= 4:
+            break
         try:
             resp = requests.get(url, timeout=60, headers=headers)
             resp.raise_for_status()
@@ -103,10 +107,9 @@ def _fetch_sheet_raw(sheet_id: str, sheet_name: str) -> tuple[pd.DataFrame | Non
             return df, None
         except Exception as e:
             ultimo_erro = str(e)
-            if tentativa < 2:
-                time.sleep(4 * (tentativa + 1))  # espera 4s, depois 8s
+            time.sleep(3 * (tentativa + 1))
 
-    return None, f"Falhou após 3 tentativas: {ultimo_erro}"
+    return None, f"Falhou em todas as tentativas: {ultimo_erro}"
 
 
 def fetch_sheet(sdr: str, sheet_id: str, sheet_name: str, usar_cache: bool = True) -> tuple[pd.DataFrame | None, str | None]:
