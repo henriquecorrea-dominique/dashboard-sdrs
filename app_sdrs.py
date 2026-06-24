@@ -168,10 +168,19 @@ def process_sheet(df_raw: pd.DataFrame, sdr: str) -> pd.DataFrame:
         return pd.Series([""] * len(df_raw), index=df_raw.index)
 
     def get_date(key: str) -> pd.Series:
-        """Converte uma coluna de data para datetime, tolerando formatos variados."""
+        """Converte uma coluna de data para datetime, tolerando formatos variados.
+        Normaliza barras invertidas (09\\06\\2026 → 09/06/2026) antes de parsear."""
         c = col_name(key)
         if c:
-            return pd.to_datetime(df_raw[c], dayfirst=True, errors="coerce")
+            normalizada = (
+                df_raw[c]
+                .fillna("")
+                .astype(str)
+                .str.replace("\\", "/", regex=False)
+                .str.strip()
+                .replace("", None)
+            )
+            return pd.to_datetime(normalizada, dayfirst=True, errors="coerce")
         return pd.Series([pd.NaT] * len(df_raw), index=df_raw.index)
 
     # Monta o DataFrame padronizado
