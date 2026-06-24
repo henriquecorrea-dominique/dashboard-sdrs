@@ -11,6 +11,7 @@ import unicodedata
 import re
 
 import pandas as pd
+import plotly.express as px
 import requests
 import streamlit as st
 from io import StringIO
@@ -308,6 +309,76 @@ k1.metric("Leads no período",  f"{total:,}".replace(",", "."))
 k2.metric("Agendados",         f"{agendados:,}".replace(",", "."))
 k3.metric("Conversão",         f"{conversao:.1f}%")
 k4.metric("SDRs com dados",    len(df_filtrado["SDR"].unique()))
+
+st.divider()
+
+# ------------------------------------------------------------
+# GRÁFICOS — VISÃO GERAL
+# Top 8 médicos, canais e SDRs por volume de leads
+# ------------------------------------------------------------
+st.subheader("Visão geral")
+
+# Agrega os dados do período já filtrado
+top_medicos = (
+    df_filtrado.groupby("Médico/BU", as_index=False)
+    .agg(Leads=("Nome", "count"))
+    .sort_values("Leads", ascending=False)
+    .head(8)
+)
+top_canais = (
+    df_filtrado.groupby("Canal", as_index=False)
+    .agg(Leads=("Nome", "count"))
+    .sort_values("Leads", ascending=False)
+    .head(8)
+)
+top_sdrs = (
+    df_filtrado.groupby("SDR", as_index=False)
+    .agg(Leads=("Nome", "count"))
+    .sort_values("Leads", ascending=False)
+)
+
+COR = "#6f4328"  # marrom principal do tema
+
+g1, g2, g3 = st.columns(3)
+
+with g1:
+    st.markdown("**Top Médicos/BU por volume**")
+    fig = px.bar(
+        top_medicos.sort_values("Leads"),
+        x="Leads", y="Médico/BU", orientation="h",
+        color_discrete_sequence=[COR],
+    )
+    fig.update_layout(margin=dict(l=0, r=10, t=10, b=0), height=320,
+                      yaxis_title=None, xaxis_title=None,
+                      plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)")
+    fig.update_traces(marker_color=COR)
+    st.plotly_chart(fig, use_container_width=True)
+
+with g2:
+    st.markdown("**Top Canais**")
+    fig = px.bar(
+        top_canais.sort_values("Leads"),
+        x="Leads", y="Canal", orientation="h",
+        color_discrete_sequence=[COR],
+    )
+    fig.update_layout(margin=dict(l=0, r=10, t=10, b=0), height=320,
+                      yaxis_title=None, xaxis_title=None,
+                      plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)")
+    fig.update_traces(marker_color=COR)
+    st.plotly_chart(fig, use_container_width=True)
+
+with g3:
+    st.markdown("**SDRs por volume**")
+    fig = px.bar(
+        top_sdrs.sort_values("Leads"),
+        x="Leads", y="SDR", orientation="h",
+        color_discrete_sequence=[COR],
+    )
+    fig.update_layout(margin=dict(l=0, r=10, t=10, b=0), height=320,
+                      yaxis_title=None, xaxis_title=None,
+                      plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)")
+    fig.update_traces(marker_color=COR)
+    st.plotly_chart(fig, use_container_width=True)
 
 st.divider()
 
