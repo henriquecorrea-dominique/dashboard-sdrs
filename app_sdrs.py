@@ -66,12 +66,19 @@ def find_col(columns: list[str], candidates: list[str]) -> int:
 # ============================================================
 
 @st.cache_data(ttl=300, show_spinner=False)
-def fetch_sheet(sdr: str, sheet_id: str, sheet_name: str) -> tuple[pd.DataFrame | None, str | None]:
+def fetch_sheet_cached(sdr: str, sheet_id: str, sheet_name: str) -> tuple[pd.DataFrame | None, str | None]:
     """
-    Busca os dados de uma planilha pública do Google Sheets via URL gviz CSV.
-    Cache de 5 minutos (ttl=300) para não bater no Google a cada filtro.
+    Versão cacheada do fetch — só é chamada em sucesso.
+    O cache dura 5 minutos (ttl=300).
+    """
+    return _fetch_sheet_raw(sheet_id, sheet_name)
+
+
+def _fetch_sheet_raw(sheet_id: str, sheet_name: str) -> tuple[pd.DataFrame | None, str | None]:
+    """
+    Busca os dados de uma planilha do Google Sheets sem cache.
     Tenta até 3 vezes com intervalo crescente antes de desistir.
-    Retorna (DataFrame, None) em sucesso ou (None, mensagem_erro) em falha.
+    Usa headers de navegador para evitar bloqueios do Google.
     """
     import time
 
@@ -79,20 +86,38 @@ def fetch_sheet(sdr: str, sheet_id: str, sheet_name: str) -> tuple[pd.DataFrame 
         f"https://docs.google.com/spreadsheets/d/{sheet_id}"
         f"/gviz/tq?tqx=out:csv&sheet={sheet_name}"
     )
+    headers = {
+        "User-Agent": (
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+            "AppleWebKit/537.36 (KHTML, like Gecko) "
+            "Chrome/124.0.0.0 Safari/537.36"
+        )
+    }
 
     ultimo_erro = ""
     for tentativa in range(3):
         try:
-            resp = requests.get(url, timeout=60)
+            resp = requests.get(url, timeout=60, headers=headers)
             resp.raise_for_status()
             df = pd.read_csv(StringIO(resp.text))
             return df, None
         except Exception as e:
             ultimo_erro = str(e)
             if tentativa < 2:
-                time.sleep(3 * (tentativa + 1))  # espera 3s, depois 6s
+                time.sleep(4 * (tentativa + 1))  # espera 4s, depois 8s
 
     return None, f"Falhou após 3 tentativas: {ultimo_erro}"
+
+
+def fetch_sheet(sdr: str, sheet_id: str, sheet_name: str, usar_cache: bool = True) -> tuple[pd.DataFrame | None, str | None]:
+    """
+    Ponto de entrada para busca de planilha.
+    Se usar_cache=True, usa o cache do Streamlit (evita rebuscar a cada filtro).
+    Se usar_cache=False (ao clicar Atualizar), busca direto ignorando cache.
+    """
+    if usar_cache:
+        return fetch_sheet_cached(sdr, sheet_id, sheet_name)
+    return _fetch_sheet_raw(sheet_id, sheet_name)
 
 
 def process_sheet(df_raw: pd.DataFrame, sdr: str) -> pd.DataFrame:
@@ -171,26 +196,41 @@ def process_sheet(df_raw: pd.DataFrame, sdr: str) -> pd.DataFrame:
     return result
 
 
-def load_all_data() -> tuple[pd.DataFrame, list[str]]:
+def load_all_data(forcar_atualizacao: bool = False) -> tuple[pd.DataFrame, list[str]]:
     """
     Carrega e processa todas as planilhas das SDRs.
+    Se forcar_atualizacao=True, ignora o cache e rebusca tudo do Google.
+    Adiciona 1s de pausa entre requisições para evitar rate-limit do Google.
     Retorna (DataFrame consolidado, lista de erros).
     """
+    import time
+
     frames = []
     errors = []
+
+    # Limpa o cache se o usuário clicou em Atualizar
+    if forcar_atualizacao:
+        fetch_sheet_cached.clear()
 
     progress = st.progress(0, text="Iniciando carregamento...")
 
     for i, fonte in enumerate(FONTES):
         progress.progress(i / len(FONTES), text=f"Carregando {fonte['sdr']}...")
 
-        df_raw, err = fetch_sheet(fonte["sdr"], fonte["id"], fonte["sheet"])
+        df_raw, err = fetch_sheet(
+            fonte["sdr"], fonte["id"], fonte["sheet"],
+            usar_cache=not forcar_atualizacao
+        )
 
         if err:
             errors.append(f"{fonte['sdr']}: {err}")
         else:
             df_proc = process_sheet(df_raw, fonte["sdr"])
             frames.append(df_proc)
+
+        # Pausa entre requisições para não ser bloqueado pelo Google
+        if i < len(FONTES) - 1:
+            time.sleep(1)
 
     progress.progress(1.0, text="Concluído.")
     progress.empty()
@@ -221,9 +261,14 @@ col_btn, col_info = st.columns([1, 4])
 with col_btn:
     carregar = st.button("🔄 Carregar / Atualizar dados", use_container_width=True)
 
-# Carrega ao clicar OU na primeira abertura
-if carregar or "dados" not in st.session_state:
-    df_all, erros = load_all_data()
+# Na primeira abertura: carrega com cache
+# Ao clicar Atualizar: ignora o cache e rebusca tudo (inclusive planilhas que tinham dado erro)
+if "dados" not in st.session_state:
+    df_all, erros = load_all_data(forcar_atualizacao=False)
+    st.session_state["dados"] = df_all
+    st.session_state["erros"] = erros
+elif carregar:
+    df_all, erros = load_all_data(forcar_atualizacao=True)
     st.session_state["dados"] = df_all
     st.session_state["erros"] = erros
 
