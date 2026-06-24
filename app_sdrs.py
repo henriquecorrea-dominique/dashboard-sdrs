@@ -69,19 +69,29 @@ def fetch_sheet(sdr: str, sheet_id: str, sheet_name: str) -> tuple[pd.DataFrame 
     """
     Busca os dados de uma planilha pública do Google Sheets via URL gviz CSV.
     Cache de 5 minutos (ttl=300) para não bater no Google a cada filtro.
+    Tenta até 3 vezes com intervalo crescente antes de desistir.
     Retorna (DataFrame, None) em sucesso ou (None, mensagem_erro) em falha.
     """
+    import time
+
     url = (
         f"https://docs.google.com/spreadsheets/d/{sheet_id}"
         f"/gviz/tq?tqx=out:csv&sheet={sheet_name}"
     )
-    try:
-        resp = requests.get(url, timeout=30)
-        resp.raise_for_status()
-        df = pd.read_csv(StringIO(resp.text))
-        return df, None
-    except Exception as e:
-        return None, str(e)
+
+    ultimo_erro = ""
+    for tentativa in range(3):
+        try:
+            resp = requests.get(url, timeout=60)
+            resp.raise_for_status()
+            df = pd.read_csv(StringIO(resp.text))
+            return df, None
+        except Exception as e:
+            ultimo_erro = str(e)
+            if tentativa < 2:
+                time.sleep(3 * (tentativa + 1))  # espera 3s, depois 6s
+
+    return None, f"Falhou após 3 tentativas: {ultimo_erro}"
 
 
 def process_sheet(df_raw: pd.DataFrame, sdr: str) -> pd.DataFrame:
